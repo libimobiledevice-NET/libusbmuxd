@@ -53,6 +53,11 @@ typedef unsigned int socklen_t;
 #endif
 
 static int debug_level = 0;
+
+#ifdef _MSC_VER
+#define strcasecmp stricmp
+#endif
+
 static uint16_t listen_port = 0;
 static uint16_t device_port = 0;
 static char* device_udid = NULL;
@@ -354,8 +359,14 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (lookup_opts == 0) {
-		lookup_opts = DEVICE_LOOKUP_USBMUX;
+	if (argc < 3) {
+		printf("usage: %s LOCAL_TCP_PORT DEVICE_TCP_PORT [UDID] [TCP|UNIX]\n", argv[0]);
+		printf("\n");
+		printf("LOCAL_TCP_PORT:\t\tThe TCP port to open on the host machine\n");
+		printf("DEVICE_TCP_PORT:\tThe TCP port to which to connect on the device\n");
+		printf("UDID:\t\t\tThe UDID of the device to which to connect\n");
+		printf("[TCP|UNIX]:\t\tThe socket protocol to use to connect to usbmuxd. Can only be specified in combination with UDID.\n");
+		return 0;
 	}
 
 	argc -= optind;
@@ -367,8 +378,16 @@ int main(int argc, char **argv)
 		return 2;
 	}
 
-	listen_port = atoi(argv[0]);
-	device_port = atoi(argv[1]);
+	if (argc > 4) {
+		if (strcasecmp(argv[4], "TCP") == 0) {
+			usbmuxd_set_socket_type(SOCKET_TYPE_TCP);
+		} else if (strcasecmp(argv[4], "UNIX") == 0) {
+			usbmuxd_set_socket_type(SOCKET_TYPE_UNIX);
+		} else {
+			fprintf(stderr, "Invalid socket protocol specified!\n");
+			return -EINVAL;
+		}
+	}
 
 	if (!listen_port) {
 		fprintf(stderr, "Invalid listen port specified!\n");
