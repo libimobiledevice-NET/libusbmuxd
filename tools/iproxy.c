@@ -31,12 +31,11 @@
 #include <string.h>
 #include <fcntl.h>
 #include <stddef.h>
-#include <unistd.h>
 #include <errno.h>
 #include <getopt.h>
 #ifdef WIN32
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 typedef unsigned int socklen_t;
 #else
 #include <sys/socket.h>
