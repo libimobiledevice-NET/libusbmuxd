@@ -332,7 +332,7 @@ int main(int argc, char **argv)
 		{ NULL, 0, NULL, 0}
 	};
 	int c = 0;
-	while ((c = getopt_long(argc, argv, "dhu:ln", longopts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "dhu:lnm", longopts, NULL)) != -1) {
 		switch (c) {
 		case 'd':
 			libusbmuxd_set_debug_level(++debug_level);
@@ -361,14 +361,8 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (argc < 3) {
-		printf("usage: %s LOCAL_TCP_PORT DEVICE_TCP_PORT [UDID] [USBMUXD_HOST]\n", argv[0]);
-		printf("\n");
-		printf("LOCAL_TCP_PORT:\t\tThe TCP port to open on the host machine\n");
-		printf("DEVICE_TCP_PORT:\tThe TCP port to which to connect on the device\n");
-		printf("UDID:\t\t\tThe UDID of the device to which to connect\n");
-		printf("USBMUXD_HOST:\t\tThe The host on which usbmuxd is running. Can only be specified in combination with UDID. Forces TCP communication with usbmuxd.\n");
-		return 0;
+	if (lookup_opts == 0) {
+		lookup_opts = DEVICE_LOOKUP_USBMUX;
 	}
 
 	argc -= optind;
@@ -380,10 +374,8 @@ int main(int argc, char **argv)
 		return 2;
 	}
 
-	if (argc > 4) {
-		usbmuxd_set_socket_type(SOCKET_TYPE_TCP);
-		usbmuxd_set_tcp_endpoint(argv[4], USBMUXD_SOCKET_PORT);
-	}
+	listen_port = atoi(argv[0]);
+	device_port = atoi(argv[1]);
 
 	if (!listen_port) {
 		fprintf(stderr, "Invalid listen port specified!\n");
