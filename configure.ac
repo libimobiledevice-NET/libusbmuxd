@@ -126,7 +126,8 @@ common/Makefile
 src/Makefile
 include/Makefile
 tools/Makefile
-libusbmuxd.pc
+docs/Makefile
+src/libusbmuxd-2.0.pc
 ])
 
 echo "
