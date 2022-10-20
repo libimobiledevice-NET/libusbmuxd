@@ -1,6 +1,10 @@
 AUTOMAKE_OPTIONS = foreign
 ACLOCAL_AMFLAGS = -I m4
-SUBDIRS = common src include tools docs
+SUBDIRS = src include tools docs
 
 EXTRA_DIST = \
-	README.md
+	README.md \
+	git-version-gen
+
+dist-hook:
+	echo $(VERSION) > $(distdir)/.tarball-version

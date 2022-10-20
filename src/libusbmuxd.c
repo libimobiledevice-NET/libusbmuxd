@@ -56,7 +56,6 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <pthread.h>
 #if defined(HAVE_PROGRAM_INVOCATION_SHORT_NAME) && !defined(HAVE_PROGRAM_INVOCATION_SHORT_NAME_ERRNO_H)
 extern char *program_invocation_short_name;
 #endif
@@ -69,6 +68,7 @@ extern int _NSGetExecutablePath(char* buf, uint32_t* bufsize);
 #ifdef HAVE_INOTIFY
 #include <sys/inotify.h>
 #include <sys/select.h>
+#include <pthread.h>
 #define EVENT_SIZE  (sizeof (struct inotify_event))
 #define EVENT_BUF_LEN (1024 * (EVENT_SIZE + 16))
 #define USBMUXD_DIRNAME "/var/run"
@@ -98,11 +98,11 @@ static char *prog_name = NULL;
 // usbmuxd protocol
 #include "usbmuxd-proto.h"
 // socket utility functions
-#include "socket.h"
+#include <libimobiledevice-glue/socket.h>
 // misc utility functions
-#include "collection.h"
+#include <libimobiledevice-glue/collection.h>
 // threads
-#include "thread.h"
+#include <libimobiledevice-glue/thread.h>
 
 static int libusbmuxd_debug = 0;
 #ifndef PACKAGE
@@ -164,6 +164,7 @@ static usbmuxd_device_info_t *devices_find(uint32_t handle)
  */
 static int connect_usbmuxd_socket()
 {
+	int res = -1;
 	char *usbmuxd_socket_addr = getenv("USBMUXD_SOCKET_ADDRESS");
 	if (usbmuxd_socket_addr) {
 		if (strncmp(usbmuxd_socket_addr, "UNIX:", 5) == 0) {
@@ -171,7 +172,11 @@ static int connect_usbmuxd_socket()
 			/* not supported, ignore */
 #else
 			if (usbmuxd_socket_addr[5] != '\0') {
-				return socket_connect_unix(usbmuxd_socket_addr+5);
+				res = socket_connect_unix(usbmuxd_socket_addr+5);
+				if (res < 0) {
+					res = -errno;
+				}
+				return res;
 			}
 #endif
 		} else {
@@ -200,11 +205,14 @@ static int connect_usbmuxd_socket()
 					connect_addr[p - usbmuxd_socket_addr] = '\0';
 				}
 				if (connect_addr && *connect_addr != '\0') {
-					int res = socket_connect(connect_addr, port);
+					res = socket_connect(connect_addr, port);
 #ifdef HAVE_INOTIFY
 					use_inotify = 0;
 #endif
 					free(connect_addr);
+					if (res < 0) {
+						res = -errno;
+					}
 					return res;
 				}
 				free(connect_addr);
@@ -212,14 +220,14 @@ static int connect_usbmuxd_socket()
 		}
 	}
 #if defined(WIN32) || defined(__CYGWIN__)
-	return socket_connect(tcp_host, tcp_port);
+	res = socket_connect("127.0.0.1", USBMUXD_SOCKET_PORT);
 #else
-	if (socket_type == SOCKET_TYPE_UNIX) {
-		return socket_connect_unix(USBMUXD_SOCKET_FILE);
-	} else {
-		return socket_connect(tcp_host, tcp_port);
-	}
+	res = socket_connect_unix(USBMUXD_SOCKET_FILE);
 #endif
+	if (res < 0) {
+		res = -errno;
+	}
+	return res;
 }
 
 static void sanitize_udid(usbmuxd_device_info_t *devinfo)
@@ -350,7 +358,9 @@ static int receive_packet(int sfd, struct usbmuxd_header *header, void **payload
 			LIBUSBMUXD_DEBUG(1, "%s: Error receiving packet: %s\n", __func__, strerror(-recv_len));
 		}
 		return recv_len;
-	} else if ((size_t)recv_len < sizeof(hdr)) {
+	}
+
+	if ((size_t)recv_len < sizeof(hdr)) {
 		LIBUSBMUXD_DEBUG(1, "%s: Received packet is too small, got %d bytes!\n", __func__, recv_len);
 		return recv_len;
 	}
@@ -510,7 +520,9 @@ static int usbmuxd_get_result(int sfd, uint32_t tag, uint32_t *result, void **re
 		}
 		free(res);
 		return ret;
-	} else if (hdr.message == MESSAGE_PLIST) {
+	}
+
+	if (hdr.message == MESSAGE_PLIST) {
 		if (!result_plist) {
 			LIBUSBMUXD_DEBUG(1, "%s: MESSAGE_PLIST result but result_plist pointer is NULL!\n", __func__);
 			return -1;
@@ -817,7 +829,7 @@ static int send_pair_record_packet(int sfd, uint32_t tag, const char* msgtype, c
 	if (device_id > 0) {
 		plist_dict_set_item(plist, "DeviceID", plist_new_uint(device_id));
 	}
-	
+
 	res = send_plist_packet(sfd, tag, plist);
 	plist_free(plist);
 
@@ -933,7 +945,9 @@ static int usbmuxd_listen_inotify()
 		int r = pselect(inot_fd+1, &rfds, NULL, NULL, &tv, NULL);
 		if (r < 0) {
 			break;
-		} else if (r == 0) {
+		}
+
+		if (r == 0) {
 			continue;
 		}
 
@@ -949,9 +963,9 @@ static int usbmuxd_listen_inotify()
 
 			/* check that it's ours */
 			if (pevent->mask & IN_CREATE &&
-			    pevent->len &&
-			    pevent->name[0] != 0 &&
-			    strcmp(pevent->name, USBMUXD_SOCKET_NAME) == 0) {
+				pevent->len &&
+				pevent->name[0] != 0 &&
+				strcmp(pevent->name, USBMUXD_SOCKET_NAME) == 0) {
 				/* retry if usbmuxd isn't ready yet */
 				int retry = 10;
 				while (--retry >= 0) {
@@ -1122,7 +1136,7 @@ static void *device_monitor(void *data)
 		while (running) {
 			int res = get_next_event(listenfd);
 			if (res < 0) {
-			    break;
+				break;
 			}
 		}
 
@@ -1148,31 +1162,31 @@ static void init_listeners(void)
 	mutex_init(&listener_mutex);
 }
 
-USBMUXD_API int usbmuxd_events_subscribe(usbmuxd_subscription_context_t *ctx, usbmuxd_event_cb_t callback, void *user_data)
+USBMUXD_API int usbmuxd_events_subscribe(usbmuxd_subscription_context_t *context, usbmuxd_event_cb_t callback, void *user_data)
 {
-	if (!ctx || !callback) {
+	if (!context || !callback) {
 		return -EINVAL;
 	}
 
 	thread_once(&listener_init_once, init_listeners);
 
 	mutex_lock(&listener_mutex);
-	*ctx = malloc(sizeof(struct usbmuxd_subscription_context));
-	if (!*ctx) {
+	*context = malloc(sizeof(struct usbmuxd_subscription_context));
+	if (!*context) {
 		mutex_unlock(&listener_mutex);
 		LIBUSBMUXD_ERROR("ERROR: %s: malloc failed\n", __func__);
 		return -ENOMEM;
 	}
-	(*ctx)->callback = callback;
-	(*ctx)->user_data = user_data;
+	(*context)->callback = callback;
+	(*context)->user_data = user_data;
 
-	collection_add(&listeners, *ctx);
+	collection_add(&listeners, *context);
 
 	if (devmon == THREAD_T_NULL || !thread_alive(devmon)) {
 		mutex_unlock(&listener_mutex);
 		int res = thread_new(&devmon, device_monitor, NULL);
 		if (res != 0) {
-			free(*ctx);
+			free(*context);
 			LIBUSBMUXD_DEBUG(1, "%s: ERROR: Could not start device watcher thread!\n", __func__);
 			return res;
 		}
@@ -1183,7 +1197,7 @@ USBMUXD_API int usbmuxd_events_subscribe(usbmuxd_subscription_context_t *ctx, us
 				usbmuxd_event_t ev;
 				ev.event = UE_DEVICE_ADD;
 				memcpy(&ev.device, dev, sizeof(usbmuxd_device_info_t));
-				(*ctx)->callback(&ev, (*ctx)->user_data);
+				(*context)->callback(&ev, (*context)->user_data);
 			}
 		} ENDFOREACH
 		mutex_unlock(&listener_mutex);
@@ -1192,26 +1206,26 @@ USBMUXD_API int usbmuxd_events_subscribe(usbmuxd_subscription_context_t *ctx, us
 	return 0;
 }
 
-USBMUXD_API int usbmuxd_events_unsubscribe(usbmuxd_subscription_context_t ctx)
+USBMUXD_API int usbmuxd_events_unsubscribe(usbmuxd_subscription_context_t context)
 {
 	int ret = 0;
 	int num = 0;
 
-	if (!ctx) {
+	if (!context) {
 		return -EINVAL;
 	}
 
 	mutex_lock(&listener_mutex);
-	if (collection_remove(&listeners, ctx) == 0) {
+	if (collection_remove(&listeners, context) == 0) {
 		FOREACH(usbmuxd_device_info_t *dev, &devices) {
 			if (dev) {
 				usbmuxd_event_t ev;
 				ev.event = UE_DEVICE_REMOVE;
 				memcpy(&ev.device, dev, sizeof(usbmuxd_device_info_t));
-				(ctx)->callback(&ev, (ctx)->user_data);
+				(context)->callback(&ev, (context)->user_data);
 			}
 		} ENDFOREACH
-		free(ctx);
+		free(context);
 	}
 	num = collection_count(&listeners);
 	mutex_unlock(&listener_mutex);
@@ -1372,7 +1386,7 @@ retry:
 			free(payload);
 		} else {
 			// we _should_ have all of them now.
-			// or perhaps an error occured.
+			// or perhaps an error occurred.
 			break;
 		}
 	}
@@ -1476,7 +1490,8 @@ USBMUXD_API int usbmuxd_get_device(const char *udid, usbmuxd_device_info_t *devi
 			if ((options & DEVICE_LOOKUP_USBMUX) && (dev_list[i].conn_type == CONNECTION_TYPE_USB)) {
 				dev_usbmuxd = &dev_list[i];
 				break;
-			} else if ((options & DEVICE_LOOKUP_NETWORK) && (dev_list[i].conn_type == CONNECTION_TYPE_NETWORK)) {
+			}
+			if ((options & DEVICE_LOOKUP_NETWORK) && (dev_list[i].conn_type == CONNECTION_TYPE_NETWORK)) {
 				dev_network = &dev_list[i];
 				break;
 			}
@@ -1525,13 +1540,12 @@ USBMUXD_API int usbmuxd_connect(const uint32_t handle, const unsigned short port
 retry:
 	sfd = connect_usbmuxd_socket();
 	if (sfd < 0) {
-		result = errno;
-		LIBUSBMUXD_DEBUG(1, "%s: Error: Connection to usbmuxd failed: %s\n", __func__, strerror(result));
-		return -result;
+		LIBUSBMUXD_DEBUG(1, "%s: Error: Connection to usbmuxd failed: %s\n", __func__, strerror(-sfd));
+		return sfd;
 	}
 
 	tag = ++use_tag;
-	if (send_connect_packet(sfd, tag, (uint32_t)handle, (uint16_t)port) <= 0) {
+	if (send_connect_packet(sfd, tag, handle, (uint16_t)port) <= 0) {
 		LIBUSBMUXD_DEBUG(1, "%s: Error sending connect message!\n", __func__);
 	} else {
 		// read ACK
@@ -1580,14 +1594,16 @@ USBMUXD_API int usbmuxd_send(int sfd, const char *data, uint32_t len, uint32_t *
 	if (sfd < 0) {
 		return -EINVAL;
 	}
-	
+
 	num_sent = socket_send(sfd, (void*)data, len);
 	if (num_sent < 0) {
 		*sent_bytes = 0;
 		num_sent = errno;
 		LIBUSBMUXD_DEBUG(1, "%s: Error %d when sending: %s\n", __func__, num_sent, strerror(num_sent));
 		return -num_sent;
-	} else if ((uint32_t)num_sent < len) {
+	}
+
+	if ((uint32_t)num_sent < len) {
 		LIBUSBMUXD_DEBUG(1, "%s: Warning: Did not send enough (only %d of %d)\n", __func__, num_sent, len);
 	}
 
@@ -1627,7 +1643,7 @@ USBMUXD_API int usbmuxd_read_buid(char **buid)
 
 	sfd = connect_usbmuxd_socket();
 	if (sfd < 0) {
-		LIBUSBMUXD_DEBUG(1, "%s: Error: Connection to usbmuxd failed: %s\n", __func__, strerror(errno));
+		LIBUSBMUXD_DEBUG(1, "%s: Error: Connection to usbmuxd failed: %s\n", __func__, strerror(-sfd));
 		return sfd;
 	}
 
@@ -1669,8 +1685,7 @@ USBMUXD_API int usbmuxd_read_pair_record(const char* record_id, char **record_da
 
 	sfd = connect_usbmuxd_socket();
 	if (sfd < 0) {
-		LIBUSBMUXD_DEBUG(1, "%s: Error: Connection to usbmuxd failed: %s\n",
-				__func__, strerror(errno));
+		LIBUSBMUXD_DEBUG(1, "%s: Error: Connection to usbmuxd failed: %s\n", __func__, strerror(-sfd));
 		return sfd;
 	}
 
@@ -1715,8 +1730,7 @@ USBMUXD_API int usbmuxd_save_pair_record_with_device_id(const char* record_id, u
 
 	sfd = connect_usbmuxd_socket();
 	if (sfd < 0) {
-		LIBUSBMUXD_DEBUG(1, "%s: Error: Connection to usbmuxd failed: %s\n",
-				__func__, strerror(errno));
+		LIBUSBMUXD_DEBUG(1, "%s: Error: Connection to usbmuxd failed: %s\n", __func__, strerror(-sfd));
 		return sfd;
 	}
 
@@ -1759,8 +1773,7 @@ USBMUXD_API int usbmuxd_delete_pair_record(const char* record_id)
 
 	sfd = connect_usbmuxd_socket();
 	if (sfd < 0) {
-		LIBUSBMUXD_DEBUG(1, "%s: Error: Connection to usbmuxd failed: %s\n",
-				__func__, strerror(errno));
+		LIBUSBMUXD_DEBUG(1, "%s: Error: Connection to usbmuxd failed: %s\n", __func__, strerror(-sfd));
 		return sfd;
 	}
 
@@ -1789,7 +1802,6 @@ USBMUXD_API void libusbmuxd_set_use_inotify(int set)
 #ifdef HAVE_INOTIFY
 	use_inotify = set;
 #endif
-	return;
 }
 
 USBMUXD_API void libusbmuxd_set_debug_level(int level)

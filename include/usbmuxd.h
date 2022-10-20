@@ -62,7 +62,7 @@ typedef struct {
 	uint32_t product_id;
 	char udid[44];
 	enum usbmux_connection_type conn_type;
-	char conn_data[200];
+	uint8_t conn_data[200];
 } usbmuxd_device_info_t;
 
 /**
@@ -186,7 +186,7 @@ USBMUXD_API_MSC int usbmuxd_device_list_free(usbmuxd_device_info_t **device_list
  *
  * @param udid A device UDID of the device to look for. If udid is NULL,
  *      This function will return the first device found.
- * @param device Pointer to a previously allocated (or static) 
+ * @param device Pointer to a previously allocated (or static)
  *      usbmuxd_device_info_t that will be filled with the device info.
  *
  * @return 0 if no matching device is connected, 1 if the device was found,

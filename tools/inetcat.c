@@ -24,6 +24,9 @@
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
+
+#define TOOL_NAME "inetcat"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -34,8 +37,8 @@
 #include <errno.h>
 #include <getopt.h>
 #ifdef WIN32
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #else
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -45,7 +48,7 @@
 #endif
 
 #include "usbmuxd.h"
-#include "socket.h"
+#include <libimobiledevice-glue/socket.h>
 
 static int debug_level = 0;
 
@@ -81,16 +84,19 @@ static void print_usage(int argc, char **argv, int is_error)
     name = strrchr(argv[0], '/');
     fprintf(is_error ? stderr : stdout, "Usage: %s [OPTIONS] DEVICE_PORT\n", (name ? name + 1: argv[0]));
     fprintf(is_error ? stderr : stdout,
-      "Proxy that enables TCP service access to iOS devices.\n\n" \
-      "  -u, --udid UDID    target specific device by UDID\n" \
-      "  -n, --network      connect to network device\n" \
-      "  -l, --local        connect to USB device (default)\n" \
-      "  -h, --help         prints usage information\n" \
-      "  -d, --debug        increase debug level\n" \
-      "\n" \
-      "Homepage: <" PACKAGE_URL ">\n"
-      "Bug reports: <" PACKAGE_BUGREPORT ">\n"
-      "\n"
+        "\n" \
+        "Opens a read/write interface via STDIN/STDOUT to a TCP port on a usbmux device.\n" \
+        "\n" \
+        "OPTIONS:\n" \
+        "  -u, --udid UDID    target specific device by UDID\n" \
+        "  -n, --network      connect to network device\n" \
+        "  -l, --local        connect to USB device (default)\n" \
+        "  -h, --help         prints usage information\n" \
+        "  -d, --debug        increase debug level\n" \
+        "  -v, --version      prints version information\n" \
+        "\n" \
+        "Homepage:    <" PACKAGE_URL ">\n"
+        "Bug Reports: <" PACKAGE_BUGREPORT ">\n"
     );
 }
 
@@ -102,6 +108,7 @@ int main(int argc, char **argv)
         { "udid", required_argument, NULL, 'u' },
         { "local", no_argument, NULL, 'l' },
         { "network", no_argument, NULL, 'n' },
+        { "version", no_argument, NULL, 'v' },
         { NULL, 0, NULL, 0}
     };
 
@@ -109,7 +116,7 @@ int main(int argc, char **argv)
     static enum usbmux_lookup_options lookup_opts = 0;
 
     int c = 0;
-    while ((c = getopt_long(argc, argv, "dhu:ln", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "dhu:lnv", longopts, NULL)) != -1) {
         switch (c) {
         case 'd':
             libusbmuxd_set_debug_level(++debug_level);
@@ -131,6 +138,9 @@ int main(int argc, char **argv)
             break;
         case 'h':
             print_usage(argc, argv, 0);
+            return 0;
+        case 'v':
+            printf("%s %s\n", TOOL_NAME, PACKAGE_VERSION);
             return 0;
         default:
             print_usage(argc, argv, 1);
@@ -187,7 +197,8 @@ int main(int argc, char **argv)
             if (dev_list[i].conn_type == CONNECTION_TYPE_USB && (lookup_opts & DEVICE_LOOKUP_USBMUX)) {
                 dev = &(dev_list[i]);
                 break;
-            } else if (dev_list[i].conn_type == CONNECTION_TYPE_NETWORK && (lookup_opts & DEVICE_LOOKUP_NETWORK)) {
+            }
+            if (dev_list[i].conn_type == CONNECTION_TYPE_NETWORK && (lookup_opts & DEVICE_LOOKUP_NETWORK)) {
                 dev = &(dev_list[i]);
                 break;
             }
@@ -205,14 +216,14 @@ int main(int argc, char **argv)
         unsigned char saddr_[32];
         memset(saddr_, '\0', sizeof(saddr_));
         struct sockaddr* saddr = (struct sockaddr*)&saddr_[0];
-        if (((char*)dev->conn_data)[1] == 0x02) { // AF_INET
+        if (dev->conn_data[1] == 0x02) { // AF_INET
             saddr->sa_family = AF_INET;
-            memcpy(&saddr->sa_data[0], (char*)dev->conn_data+2, 14);
+            memcpy(&saddr->sa_data[0], (uint8_t*)dev->conn_data+2, 14);
         }
-        else if (((char*)dev->conn_data)[1] == 0x1E) { //AF_INET6 (bsd)
+        else if (dev->conn_data[1] == 0x1E) { //AF_INET6 (bsd)
 #ifdef AF_INET6
             saddr->sa_family = AF_INET6;
-            memcpy(&saddr->sa_data[0], (char*)dev->conn_data+2, 26);
+            memcpy(&saddr->sa_data[0], (uint8_t*)dev->conn_data+2, 26);
 #else
             fprintf(stderr, "ERROR: Got an IPv6 address but this system doesn't support IPv6\n");
             free(dev_list);
@@ -220,7 +231,7 @@ int main(int argc, char **argv)
 #endif
         }
         else {
-            fprintf(stderr, "Unsupported address family 0x%02x\n", ((char*)dev->conn_data)[1]);
+            fprintf(stderr, "Unsupported address family 0x%02x\n", dev->conn_data[1]);
             free(dev_list);
             return 1;
         }
