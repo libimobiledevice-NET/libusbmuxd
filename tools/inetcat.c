@@ -33,7 +33,13 @@
 #include <string.h>
 #include <fcntl.h>
 #include <stddef.h>
+#ifndef _MSC_VER
 #include <unistd.h>
+#else
+#include <io.h>
+#define STDIN_FILENO _fileno(stdin)
+#define STDOUT_FILENO _fileno(stdout)
+#endif
 #include <errno.h>
 #include <getopt.h>
 #ifdef WIN32
