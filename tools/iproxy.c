@@ -158,10 +158,10 @@ static void *acceptor_thread(void *arg)
 		if (!socket_addr_to_string(saddr, addrtxt, sizeof(addrtxt))) {
 			fprintf(stderr, "Failed to convert network address: %d (%s)\n", errno, strerror(errno));
 		}
-		fprintf(stdout, "Requesting connecion to NETWORK device %s (serial: %s), port %d\n", addrtxt, dev->udid, cdata->device_port);
+		fprintf(stdout, "Requesting connection to NETWORK device %s (serial: %s), port %d\n", addrtxt, dev->udid, cdata->device_port);
 		cdata->sfd = socket_connect_addr(saddr, cdata->device_port);
 	} else if (dev->conn_type == CONNECTION_TYPE_USB) {
-		fprintf(stdout, "Requesting connecion to USB device handle %d (serial: %s), port %d\n", dev->handle, dev->udid, cdata->device_port);
+		fprintf(stdout, "Requesting connection to USB device handle %d (serial: %s), port %d\n", dev->handle, dev->udid, cdata->device_port);
 
 		cdata->sfd = usbmuxd_connect(dev->handle, cdata->device_port);
 	}
@@ -173,10 +173,11 @@ static void *acceptor_thread(void *arg)
 		FD_ZERO(&fds);
 		FD_SET(cdata->fd, &fds);
 		FD_SET(cdata->sfd, &fds);
+		int maxfd = cdata->fd > cdata->sfd ? cdata->fd : cdata->sfd;
 
 		while (1) {
 			fd_set read_fds = fds;
-			int ret_sel = select(cdata->sfd+1, &read_fds, NULL, NULL, NULL);
+			int ret_sel = select(maxfd+1, &read_fds, NULL, NULL, NULL);
 			if (ret_sel < 0) {
 				perror("select");
 				break;
@@ -381,7 +382,7 @@ int main(int argc, char **argv)
 	for (i = 0; i < num_pairs; i++) {
 		printf("Creating listening port %d for device port %d\n", listen_port[i], device_port[i]);
 		if (!source_addr) {
-			listen_sock[num_listen].fd = socket_create("127.0.0.1", listen_port[i]);
+			listen_sock[num_listen].fd = socket_create(NULL, listen_port[i]);
 			if (listen_sock[num_listen].fd < 0) {
 				int j;
 				fprintf(stderr, "Error creating socket for listen port %u: %s\n", listen_port[i], strerror(errno));
@@ -394,21 +395,6 @@ int main(int argc, char **argv)
 			}
 			listen_sock[num_listen].index = i;
 			num_listen++;
-#if defined(AF_INET6)
-			listen_sock[num_listen].fd = socket_create("::1", listen_port[i]);
-			if (listen_sock[num_listen].fd < 0) {
-				int j;
-				fprintf(stderr, "Error creating socket for listen port %u: %s\n", listen_port[i], strerror(errno));
-				free(source_addr);
-				free(device_udid);
-				for (j = num_listen; j >= 0; j--) {
-					socket_close(listen_sock[j].fd);
-				}
-				return -errno;
-			}
-			listen_sock[num_listen].index = i;
-			num_listen++;
-#endif
 		} else {
 			listen_sock[num_listen].fd = socket_create(source_addr, listen_port[i]);
 			if (listen_sock[num_listen].fd < 0) {
