@@ -24,16 +24,6 @@
 #define USBMUXD_H
 #include <stdint.h>
 
-#ifdef _MSC_VER
-	#define USBMUXD_API_MSC __declspec( dllexport )
-#else
-	#ifdef HAVE_FVISIBILITY
-		#define USBMUXD_API_MSC __attribute__((visibility("default")))
-	#else
-		#define USBMUXD_API_MSC
-	#endif
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
